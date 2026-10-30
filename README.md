@@ -1,6 +1,7 @@
 # Proyek Analisis Data: E-Commerce Public Dataset (Olist)
+By : Mila Sari Rusadi
 
-Analisis data e-commerce Brasil (pesanan *delivered*, Jan 2017 – Agu 2018) untuk menjawab:
+Analisis data e-commerce untuk menuntaskan submission dicoding, analisis ini dibuat untuk menjawab pertanyaan berikut:
 1. Kategori produk apa yang menyumbang revenue tertinggi/terendah dan bagaimana tren bulanan 5 kategori teratas?
 2. Bagaimana sebaran segmen pelanggan (RFM) dan negara bagian mana yang paling besar kontribusi revenue-nya?
 
