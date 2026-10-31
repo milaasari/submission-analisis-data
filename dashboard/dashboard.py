@@ -10,6 +10,15 @@ st.set_page_config(page_title="E-Commerce Dashboard", page_icon="🛒", layout="
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PRIMARY = "#1f5fa8"
 
+STATE_NAMES = {
+    "AC": "Acre", "AL": "Alagoas", "AP": "Amapá", "AM": "Amazonas", "BA": "Bahia", "CE": "Ceará",
+    "DF": "Distrito Federal", "ES": "Espírito Santo", "GO": "Goiás", "MA": "Maranhão", "MT": "Mato Grosso",
+    "MS": "Mato Grosso do Sul", "MG": "Minas Gerais", "PA": "Pará", "PB": "Paraíba", "PR": "Paraná",
+    "PE": "Pernambuco", "PI": "Piauí", "RJ": "Rio de Janeiro", "RN": "Rio Grande do Norte",
+    "RS": "Rio Grande do Sul", "RO": "Rondônia", "RR": "Roraima", "SC": "Santa Catarina", "SP": "São Paulo",
+    "SE": "Sergipe", "TO": "Tocantins",
+}
+
 
 @st.cache_data
 def load_data():
@@ -17,6 +26,8 @@ def load_data():
         os.path.join(BASE_DIR, "main_data.csv"), parse_dates=["order_purchase_timestamp"]
     )
     geo = pd.read_csv(os.path.join(BASE_DIR, "state_geo.csv"))
+    df["state_name"] = df.customer_state.map(STATE_NAMES)
+    geo["state_name"] = geo.geolocation_state.map(STATE_NAMES)
     return df, geo
 
 
@@ -61,7 +72,7 @@ df, geo = load_data()
 st.sidebar.title("Filter")
 min_d, max_d = df.order_purchase_timestamp.min().date(), df.order_purchase_timestamp.max().date()
 date_range = st.sidebar.date_input("Rentang tanggal", (min_d, max_d), min_value=min_d, max_value=max_d)
-all_states = sorted(df.customer_state.unique())
+all_states = sorted(df.state_name.unique())
 states = st.sidebar.multiselect("Negara bagian pelanggan", all_states, default=all_states)
 
 if len(date_range) != 2:
@@ -71,7 +82,7 @@ if len(date_range) != 2:
 mask = (
     (df.order_purchase_timestamp.dt.date >= date_range[0])
     & (df.order_purchase_timestamp.dt.date <= date_range[1])
-    & (df.customer_state.isin(states))
+    & (df.state_name.isin(states))
 )
 data = df[mask]
 if data.empty:
@@ -96,16 +107,32 @@ with tab1:
     cat = data.groupby("category").price.sum().sort_values(ascending=False)
     n_top = st.slider("Jumlah kategori yang ditampilkan", 5, 15, 10)
 
+    total_rev = cat.sum()
+    cat_df = cat.rename("revenue").reset_index()
+    cat_df["Kontribusi (%)"] = cat_df.revenue / total_rev * 100
+    cat_df["label"] = cat_df.apply(lambda r: f"BRL {r.revenue:,.0f} ({r['Kontribusi (%)']:.2f}%)", axis=1)
+
     left, right = st.columns(2)
-    top = cat.head(n_top).iloc[::-1].reset_index()
-    fig = px.bar(top, x="price", y="category", orientation="h", color_discrete_sequence=[PRIMARY],
-                 labels={"price": "Revenue (BRL)", "category": ""}, title=f"{n_top} Kategori Revenue Tertinggi")
+    top = cat_df.head(n_top).iloc[::-1]
+    fig = px.bar(top, x="revenue", y="category", orientation="h", color_discrete_sequence=[PRIMARY], text="label",
+                 labels={"revenue": "Revenue (BRL)", "category": ""}, title=f"{n_top} Kategori Revenue Tertinggi")
+    fig.update_traces(textposition="outside", cliponaxis=False)
+    fig.update_xaxes(range=[0, top.revenue.max() * 1.45])
     left.plotly_chart(fig)
 
-    bottom = cat.tail(n_top).reset_index()
-    fig = px.bar(bottom, x="price", y="category", orientation="h", color_discrete_sequence=["#b8bec6"],
-                 labels={"price": "Revenue (BRL)", "category": ""}, title=f"{n_top} Kategori Revenue Terendah")
+    bottom = cat_df.tail(n_top)
+    fig = px.bar(bottom, x="revenue", y="category", orientation="h", color_discrete_sequence=["#b8bec6"], text="label",
+                 labels={"revenue": "Revenue (BRL)", "category": ""}, title=f"{n_top} Kategori Revenue Terendah")
+    fig.update_traces(textposition="outside", cliponaxis=False)
+    fig.update_xaxes(range=[0, bottom.revenue.max() * 1.6])
     right.plotly_chart(fig)
+
+    with st.expander("Lihat tabel revenue dan kontribusi seluruh kategori"):
+        st.dataframe(
+            cat_df.rename(columns={"category": "Kategori", "revenue": "Revenue (BRL)"})[
+                ["Kategori", "Revenue (BRL)", "Kontribusi (%)"]].round(3),
+            hide_index=True,
+        )
 
     st.subheader("Tren revenue bulanan")
     default_cats = cat.head(5).index.tolist()
@@ -132,6 +159,10 @@ with tab2:
              avg_recency=("recency", "mean"), avg_monetary=("monetary", "mean"))
         .reset_index()
     )
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Pelanggan dianalisis", f"{len(rfm):,}")
+    m2.metric("Rata-rata Recency", f"{rfm.recency.mean():,.1f} hari")
+    m3.metric("Rata-rata Monetary", f"BRL {rfm.monetary.mean():,.2f}")
     seg["% Pelanggan"] = seg.customers / seg.customers.sum() * 100
     seg["% Revenue"] = seg.revenue / seg.revenue.sum() * 100
     seg = seg.sort_values("% Revenue", ascending=False)
@@ -147,10 +178,14 @@ with tab2:
                             "avg_recency": "Rata-rata Recency (hari)", "avg_monetary": "Rata-rata Monetary"})
         .round(1), hide_index=True,
     )
+    st.caption(
+        "Big Spenders: 1x beli, belanja terbesar (skor M=5) | Champions: >=2x beli & baru | Loyal: >=2x beli & tidak baru | "
+        "New/Recent: 1x beli & baru | Lost/Hibernating: 1x beli & sudah lama | Average: lainnya."
+    )
 
     st.subheader("Kontribusi revenue per negara bagian")
     state = (
-        data.groupby("customer_state")
+        data.groupby("state_name")
         .agg(revenue=("price", "sum"), customers=("customer_unique_id", "nunique"))
         .reset_index()
     )
@@ -158,17 +193,31 @@ with tab2:
     state["pct"] = state.revenue / state.revenue.sum() * 100
 
     left, right = st.columns(2)
-    top_state = state.sort_values("pct", ascending=False).head(10).iloc[::-1]
-    fig = px.bar(top_state, x="pct", y="customer_state", orientation="h", color_discrete_sequence=[PRIMARY],
-                 labels={"pct": "% dari total revenue", "customer_state": ""}, title="10 Negara Bagian Teratas")
+    n_state = st.slider("Jumlah negara bagian yang ditampilkan", 5, 27, 10)
+    state = state.sort_values("pct", ascending=False)
+    state["label"] = state.apply(lambda r: f"{r.pct:.2f}% (BRL {r.revenue:,.0f})", axis=1)
+    top_state = state.head(n_state).iloc[::-1]
+    fig = px.bar(top_state, x="pct", y="state_name", orientation="h", color_discrete_sequence=[PRIMARY], text="label",
+                 labels={"pct": "% dari total revenue", "state_name": ""}, title=f"{n_state} Negara Bagian Teratas",
+                 height=max(400, 28 * n_state))
+    fig.update_traces(textposition="outside", cliponaxis=False)
+    fig.update_xaxes(range=[0, top_state.pct.max() * 1.5])
     left.plotly_chart(fig)
 
-    gm = state.merge(geo, left_on="customer_state", right_on="geolocation_state")
+    gm = state.merge(geo, on="state_name")
     fig = px.scatter_geo(gm, lat="lat", lon="lng", size="revenue", color="revenue_per_customer",
-                         hover_name="customer_state", color_continuous_scale="Blues",
+                         hover_name="state_name", color_continuous_scale="Blues",
                          labels={"revenue_per_customer": "Revenue/pelanggan (BRL)"},
                          title="Peta Revenue per Negara Bagian", scope="south america")
     fig.update_geos(fitbounds="locations", showcountries=True)
     right.plotly_chart(fig)
+
+    st.subheader("Tabel seluruh negara bagian")
+    tbl = state.assign(cum=state.pct.cumsum())[["state_name", "revenue", "pct", "cum", "customers", "revenue_per_customer"]]
+    st.dataframe(
+        tbl.rename(columns={"state_name": "Negara bagian", "revenue": "Revenue (BRL)", "pct": "Kontribusi (%)",
+                            "cum": "Kumulatif (%)", "customers": "Pelanggan", "revenue_per_customer": "Revenue/pelanggan (BRL)"})
+        .round(2), hide_index=True,
+    )
 
 st.caption("Sumber data: Olist Brazilian E-Commerce Public Dataset • Proyek Analisis Data")
